@@ -32,3 +32,6 @@ jobs:
         run: |
           cd scraper
           python scraper.py
+          
+      - name: Trigger WordPress Publisher
+        run: curl -X GET "https://apply.goodprofile.com.ng/wp-json/obituary/v1/fetch?secret=4te7JESvqcyl"
