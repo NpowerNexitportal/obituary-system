@@ -13,39 +13,47 @@ def discover_rss_feeds(keyword):
     """
     Uses DuckDuckGo to search for obituary blogs on specific domains,
     then automatically discovers their RSS feeds.
+    Prioritizes .site -> .today -> .com.ng. Gets max 3 feeds total.
     """
-    found_feeds = set()
+    found_feeds = []
     base_urls = set()
     
-    # We want to find sites on specific extensions
-    query = f"{keyword} site:.site OR site:.today OR site:.com.ng"
+    # Priority queues
+    queries = [
+        f"{keyword} site:.site",
+        f"{keyword} site:.today",
+        f"{keyword} site:.com.ng"
+    ]
     
-    try:
-        print(f"Searching for new blogs using query: {query}")
-        with DDGS() as ddgs:
-            # Search DDG for our target sites
-            results = list(ddgs.text(query, max_results=10))
+    for query in queries:
+        if len(found_feeds) >= 3:
+            break
             
-            for res in results:
-                url = res.get('href')
-                if url:
-                    parsed_uri = urlparse(url)
-                    base_url = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
-                    base_urls.add(base_url)
-    except Exception as e:
-        print(f"DuckDuckGo search error: {e}")
-        
-    print(f"Found {len(base_urls)} distinct target domains.")
-    
-    # Now, attempt to find RSS feeds for these base domains
-    for base_url in base_urls:
-        print(f"Probing {base_url} for RSS feeds...")
-        feed_url = find_rss_feed(base_url)
-        if feed_url:
-            found_feeds.add(feed_url)
-            print(f" -> Found Feed: {feed_url}")
+        try:
+            print(f"Searching for new blogs using query: {query}")
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=10))
+                
+                for res in results:
+                    url = res.get('href')
+                    if url:
+                        parsed_uri = urlparse(url)
+                        base_url = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+                        
+                        if base_url not in base_urls:
+                            base_urls.add(base_url)
+                            print(f"Probing {base_url} for RSS feeds...")
+                            feed_url = find_rss_feed(base_url)
+                            if feed_url and feed_url not in found_feeds:
+                                found_feeds.append(feed_url)
+                                print(f" -> Found Feed: {feed_url}")
+                                
+                    if len(found_feeds) >= 3:
+                        break
+        except Exception as e:
+            print(f"DuckDuckGo search error: {e}")
             
-    return list(found_feeds)
+    return found_feeds[:3]
 
 def find_rss_feed(base_url):
     """
