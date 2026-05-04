@@ -1,90 +1,127 @@
 import requests
 from bs4 import BeautifulSoup
-import re
+import feedparser
+from duckduckgo_search import DDGS
+from urllib.parse import urlparse
+import time
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+def discover_rss_feeds(keyword):
+    """
+    Uses DuckDuckGo to search for obituary blogs on specific domains,
+    then automatically discovers their RSS feeds.
+    """
+    found_feeds = set()
+    base_urls = set()
+    
+    # We want to find sites on specific extensions
+    query = f"{keyword} site:.site OR site:.today OR site:.com.ng"
+    
+    try:
+        print(f"Searching for new blogs using query: {query}")
+        with DDGS() as ddgs:
+            # Search DDG for our target sites
+            results = list(ddgs.text(query, max_results=10))
+            
+            for res in results:
+                url = res.get('href')
+                if url:
+                    parsed_uri = urlparse(url)
+                    base_url = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+                    base_urls.add(base_url)
+    except Exception as e:
+        print(f"DuckDuckGo search error: {e}")
+        
+    print(f"Found {len(base_urls)} distinct target domains.")
+    
+    # Now, attempt to find RSS feeds for these base domains
+    for base_url in base_urls:
+        print(f"Probing {base_url} for RSS feeds...")
+        feed_url = find_rss_feed(base_url)
+        if feed_url:
+            found_feeds.add(feed_url)
+            print(f" -> Found Feed: {feed_url}")
+            
+    return list(found_feeds)
+
+def find_rss_feed(base_url):
+    """
+    Probes a website to find its RSS feed URL.
+    """
+    common_paths = ['/feed', '/rss', '/feed.xml', '/index.xml', '/feed/']
+    
+    # 1. Try parsing the HTML head for RSS link tags first (most reliable)
+    try:
+        resp = requests.get(base_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            # Look for <link rel="alternate" type="application/rss+xml">
+            link = soup.find('link', type='application/rss+xml')
+            if link and link.get('href'):
+                href = link['href']
+                if href.startswith('/'):
+                    return base_url + href
+                return href
+    except:
+        pass
+        
+    # 2. Try common paths manually
+    for path in common_paths:
+        test_url = base_url + path
+        try:
+            resp = requests.get(test_url, headers=HEADERS, timeout=5)
+            if resp.status_code == 200 and ('xml' in resp.headers.get('Content-Type', '') or 'rss' in resp.text[:200].lower()):
+                return test_url
+        except:
+            pass
+            
+    return None
+
+def fetch_rss_articles(feed_url, limit=3):
+    """
+    Parses an RSS feed and returns the latest articles.
+    """
+    articles = []
+    try:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:limit]:
+            content = ""
+            if hasattr(entry, 'content'):
+                content = entry.content[0].value
+            elif hasattr(entry, 'summary'):
+                content = entry.summary
+            elif hasattr(entry, 'description'):
+                content = entry.description
+                
+            # Clean HTML from content
+            clean_content = BeautifulSoup(content, 'html.parser').get_text(separator=' ', strip=True)
+            
+            if len(clean_content) > 100:
+                articles.append({
+                    "source_url": entry.link,
+                    "raw_content": clean_content,
+                    "title": entry.title
+                })
+    except Exception as e:
+        print(f"Error reading feed {feed_url}: {e}")
+        
+    return articles
 
 def search_and_extract(keyword):
     """
-    Searches Google Search for the keyword and extracts text content from top results,
-    filtering for specific domain extensions (.com.ng, .sites, .today).
+    Main entrypoint: Discovers feeds via search and extracts their latest articles.
     """
     results = []
-    try:
-        from urllib.parse import urlparse
-        # Append Google Search site operators to strictly force Google to return these extensions
-        query_string = f"{keyword} site:.com.ng OR site:.today OR site:.site OR site:.sites"
-        query = query_string.replace(' ', '+')
-        url = f"https://www.google.com/search?q={query}"
-        
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        links = []
-        
-        # Extract result links from Google search page
-        for a in soup.find_all('a', href=True):
-            href = a['href']
+    feeds = discover_rss_feeds(keyword)
+    print(f"Discovered {len(feeds)} RSS feeds for keyword '{keyword}'. Extracting content...")
+    
+    for feed in feeds:
+        articles = fetch_rss_articles(feed, limit=2)
+        for art in articles:
+            art['keyword'] = keyword
+            results.append(art)
             
-            # Google often redirects URLs via /url?q=
-            if href.startswith('/url?q='):
-                href = href.split('/url?q=')[1].split('&')[0]
-                
-            if href.startswith('http'):
-                domain = urlparse(href).netloc.lower()
-                
-                # Filter domains based on user requirements (.com.ng, .sites, .today)
-                if domain.endswith('.com.ng') or domain.endswith('.sites') or domain.endswith('.site') or domain.endswith('.today'):
-                    if href not in links:
-                        links.append(href)
-                        
-            if len(links) >= 10: # Get up to 10 matching links
-                break
-                
-        for link in links:
-            content = extract_article_content(link)
-            if content:
-                results.append({
-                    "source_url": link,
-                    "raw_content": content,
-                    "keyword": keyword
-                })
-    except Exception as e:
-        print(f"Error searching for {keyword}: {e}")
-        
     return results
-
-def extract_article_content(url):
-    """
-    Visits the URL and extracts the main text using basic heuristics.
-    """
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Remove script and style elements
-        for script in soup(["script", "style", "nav", "footer", "header"]):
-            script.extract()
-            
-        # Try to find main content areas
-        main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile('(content|article|body)', re.I))
-        
-        if main_content:
-            text = main_content.get_text(separator=' ', strip=True)
-        else:
-            text = soup.get_text(separator=' ', strip=True)
-            
-        # Clean up excessive whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Return only if it has substantial content
-        if len(text) > 300:
-            return text
-            
-    except Exception as e:
-        print(f"Error extracting content from {url}: {e}")
-        
-    return None
