@@ -170,7 +170,7 @@ function oap_fetch_and_publish() {
             $post_data = array(
                 'post_title'    => wp_strip_all_tags($obituary['title']),
                 'post_name'     => $slug,
-                'post_content'  => $obituary['content'] . "\n\n<br><em>Source: " . esc_url($obituary['source_url']) . "</em>",
+                'post_content'  => wp_kses_post($obituary['content']),
                 'post_status'   => 'publish',
                 'post_author'   => 1,
                 'post_category' => array($category_id)

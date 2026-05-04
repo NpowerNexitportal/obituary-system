@@ -1,54 +1,53 @@
+from deep_translator import GoogleTranslator
 import re
-from datetime import datetime
 
-def rewrite_content(raw_content, name_hint=""):
+def translate_text(text, source_lang, target_lang):
+    try:
+        translator = GoogleTranslator(source=source_lang, target=target_lang)
+        # Translator has a 5000 char limit per chunk.
+        if len(text) > 4999:
+            text = text[:4999]
+        return translator.translate(text)
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return text
+
+def rewrite_obituary(obituary_data):
     """
-    Rewrites the raw content into a 100% unique SEO-optimized article.
-    Extracts name, location, date of death, etc.
+    Spins the obituary content using Google Translate:
+    English -> Spanish -> French -> English
+    Also appends (2026) to the exact source title.
     """
-    # Simple extraction heuristics (An LLM would do this much better)
-    name = extract_name(raw_content) or name_hint or "Unknown Person"
-    location = extract_location(raw_content) or "Unknown Location"
+    raw_content = obituary_data.get('raw_content', '')
+    title = obituary_data.get('title', 'Unknown Obituary')
     
-    # Construct SEO optimized unique content
-    current_date = datetime.utcnow().strftime('%B %d, %Y')
+    print(f"Spinning content for: {title}")
     
-    title = f"{name} Obituary - Passed Away in {location}"
-    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+    # 1. Spin the content (EN -> ES -> FR -> EN)
+    es_text = translate_text(raw_content, 'en', 'es')
+    fr_text = translate_text(es_text, 'es', 'fr')
+    final_en_text = translate_text(fr_text, 'fr', 'en')
     
-    meta_description = f"Read the obituary and life legacy of {name} who recently passed away in {location}. Share your condolences and memories."
+    # Fallback to original if translation fails
+    if not final_en_text or len(final_en_text) < 50:
+        final_en_text = raw_content
+        
+    # 2. Append (2026) to the title
+    final_title = f"{title.strip()} (2026)"
     
-    # Generate a unique summary/content
-    rewritten_content = (
-        f"It is with heavy hearts that we share the news of the passing of {name}, "
-        f"a beloved member of the {location} community. {name} passed away leaving behind "
-        f"a legacy of love and memories. Friends and family are mourning the loss of a truly "
-        f"special individual.\n\n"
-        f"The community in {location} has been deeply affected by this loss. "
-        f"Funeral arrangements and memorial services are being organized to honor and celebrate "
-        f"the life of {name}. We extend our deepest sympathies to the family during this difficult time."
-        f"\n\n(Note: This is an auto-generated rewritten summary to maintain unique, respectful SEO content.)"
-    )
+    # 3. Meta description (first 150 chars)
+    meta_description = final_en_text[:150] + "..." if len(final_en_text) > 150 else final_en_text
     
+    # Generate slug from title
+    slug = re.sub(r'[^a-z0-9]+', '-', final_title.lower()).strip('-')
+
     return {
-        "name": name,
-        "title": title,
+        "name": final_title,  # Used loosely
+        "title": final_title,
         "slug": slug,
-        "content": rewritten_content,
+        "content": final_en_text,
         "meta_description": meta_description,
-        "location": location,
-        "date_of_death": current_date, # Fallback, should extract
-        "hash": None # Generated later
+        "location": "Unknown",
+        "date_of_death": "Recently",
+        "source_url": obituary_data.get('source_url', '') # Tracking internally, not displayed
     }
-
-def extract_name(text):
-    match = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)(?:.*)(?:passed away|died|obituary)', text)
-    if match:
-        return match.group(1)
-    return None
-
-def extract_location(text):
-    match = re.search(r'(?:in|from|resident of) ([A-Z][a-zA-Z\s]+(?:,\s*[A-Z]{2})?)', text)
-    if match:
-        return match.group(1).strip()
-    return None
