@@ -14,8 +14,9 @@ def search_and_extract(keyword):
     results = []
     try:
         from urllib.parse import urlparse
-        # Use Google Search URL
-        query = keyword.replace(' ', '+')
+        # Append Google Search site operators to strictly force Google to return these extensions
+        query_string = f"{keyword} site:.com.ng OR site:.today OR site:.site OR site:.sites"
+        query = query_string.replace(' ', '+')
         url = f"https://www.google.com/search?q={query}"
         
         response = requests.get(url, headers=HEADERS, timeout=10)
@@ -40,7 +41,7 @@ def search_and_extract(keyword):
                     if href not in links:
                         links.append(href)
                         
-            if len(links) >= 5: # Get up to 5 matching links
+            if len(links) >= 10: # Get up to 10 matching links
                 break
                 
         for link in links:
