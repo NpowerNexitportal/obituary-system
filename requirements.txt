@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+motor
+pymongo
+pydantic
+pydantic-settings
+requests
+beautifulsoup4
+pytrends
+python-dotenv
+openai
